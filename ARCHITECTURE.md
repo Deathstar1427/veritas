@@ -1,23 +1,24 @@
-# Veritas Architecture
+# FairScan Architecture
 
-Technical reference for the current production-oriented Veritas implementation.
+Technical reference for the current FairScan codebase.
 
 ---
 
 ## 1) System Overview
 
-Veritas is a two-tier web application:
+FairScan is a desktop-first bias auditing SaaS with two independently deployable tiers:
 
-- Frontend: React + Vite SPA (hosted on Firebase Hosting)
-- Backend: FastAPI API service (Cloud Run/local Uvicorn)
+- **Frontend**: React 18 + Vite SPA with Firebase Auth (Google sign-in), hosted on Firebase Hosting
+- **Backend**: FastAPI service with Firebase Admin SDK token verification, deployed to Cloud Run
 
 Core flow:
 
-1. User selects domain and uploads CSV (or chooses sample dataset)
-2. Backend validates input and computes fairness metrics
-3. Backend requests Gemini explanation text (with fallback behavior)
-4. Frontend renders metrics + explanation + recommendations
-5. User can export a PDF report
+1. User signs in via Google (Firebase Auth)
+2. Selects an audit domain and uploads a CSV
+3. Backend validates input, computes Fairlearn-based fairness metrics
+4. Backend requests Gemini explanation text (with graceful fallback)
+5. Frontend renders metrics, charts, and AI explanation
+6. User can export a styled PDF report
 
 ---
 
@@ -26,151 +27,191 @@ Core flow:
 ```text
 Browser (React SPA)
   |
-  | HTTP (Axios)
+  | HTTP + Bearer token (authenticatedFetch)
   v
 FastAPI backend (/api/*)
-  |- routes/analyze.py
-  |- services/bias_service.py
-  |- services/bias_engine.py
-  |- services/gemini_service.py
-  |- services/pdf_generator.py
-  `- domain_config.py
+  |- auth_middleware.py         (Firebase token verification)
+  |- firebase_admin_init.py     (Firebase Admin SDK bootstrap)
+  |- app/routes/analyze.py      (endpoints)
+  |- app/services/bias_service.py
+  |- app/services/gemini_service.py
+  |- app/services/pdf_generator.py
+  `- app/domain_config.py
 ```
-
-Frontend and backend are independently deployable.
 
 ---
 
-## 3) Backend Architecture
+## 3) Authentication
 
-### 3.1 Entry Point
+### 3.1 Frontend Auth
+
+- `frontend/src/firebase.js`
+  - Initializes Firebase app from `VITE_FIREBASE_*` env vars
+  - Exports `auth` instance and `GoogleAuthProvider`
+
+- `frontend/src/AuthContext.jsx`
+  - React Context providing `{ user, login, logout, loading }`
+  - `login()` → `signInWithPopup` (Google)
+  - `logout()` → `signOut`
+  - Listens to `onAuthStateChanged` for session persistence
+
+- `frontend/src/ProtectedRoute.jsx`
+  - Wraps dashboard; redirects to `/login` when unauthenticated
+
+- `frontend/src/api.js`
+  - `authenticatedFetch(url, options)` wrapper
+  - Attaches `Authorization: Bearer <idToken>` to every request
+  - Auto-sets `Content-Type: application/json` for non-FormData bodies
+
+- `frontend/src/pages/Login.jsx`
+  - Full-page Google sign-in UI with branded design
+  - Redirects to original path after successful login
+
+### 3.2 Backend Auth
+
+- `backend/auth_middleware.py`
+  - FastAPI dependency `verify_token()`
+  - Extracts Bearer token from `Authorization` header
+  - Verifies via `firebase_admin.auth.verify_id_token()`
+  - Returns `uid` on success; raises 401 on failure
+
+- `backend/firebase_admin_init.py`
+  - `init_firebase()` — idempotent Firebase Admin init
+  - Credential resolution order:
+    1. `FIREBASE_SERVICE_ACCOUNT_JSON` env var (base64 or raw JSON)
+    2. Local `serviceAccountKey.json` file
+    3. Application Default Credentials (Cloud Run)
+
+---
+
+## 4) Backend Architecture
+
+### 4.1 Entry Point
 
 - `backend/main.py`
-  - Initializes FastAPI app
-  - Configures CORS for local + deployed frontend origins
+  - Initializes FastAPI app (title: "Veritas API", v1.0.0)
+  - CORS middleware for local dev + production origins
   - Registers router under `/api`
-  - Exposes `/` and `/health`
+  - Exposes `GET /` and `GET /health`
 
-### 3.2 Router
+### 4.2 Router
 
 - `backend/app/routes/analyze.py`
 
 Endpoints:
 
-- `GET /api/domains`
-- `POST /api/analyze`
-- `GET /api/sample-datasets`
-- `GET /api/sample/{domain}`
-- `POST /api/export`
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/domains` | No | Returns available domains and config |
+| `POST` | `/api/analyze` | Yes (Bearer) | Accepts CSV + domain, returns bias metrics + explanation |
+| `POST` | `/api/export` | No | Accepts bias results JSON, returns PDF stream |
 
-### 3.3 Services
+### 4.3 Services
 
 - `backend/app/services/bias_service.py`
-  - Validates required outcome/protected columns
-  - Computes:
-    - Demographic Parity Difference
-    - Equalized Odds Difference
-    - Group selection rates
-    - Disparate Impact Ratio
-  - Computes bias severity (`High`, `Medium`, `Low`)
-
-- `backend/app/services/bias_engine.py`
-  - Loads domain sample CSV from `backend/sample_data`
-  - Caches analyzed sample results in module-level `_sample_cache`
+  - `detect_bias(df, domain)` — main analysis function
+  - Validates outcome column and protected attributes exist in CSV
+  - For each protected attribute computes:
+    - **Demographic Parity Difference** (via Fairlearn)
+    - **Equalized Odds Difference** (custom TPR-based: `max(TPR) - min(TPR)`)
+    - **Group selection rates** (percent of positive outcomes per group)
+    - **Disparate Impact Ratio** (`min_rate / max_rate`)
+  - Determines bias severity per attribute (`High`, `Medium`, `Low`)
+  - Returns `equalized_odds_tpr_by_group` per attribute for debugging
 
 - `backend/app/services/gemini_service.py`
   - Initializes Gemini client from `GEMINI_API_KEY`
-  - Chooses preferred available model dynamically when possible
+  - Dynamically selects preferred available model
   - Produces concise natural-language explanation
   - Handles API/model/quota failures with fallback messages
 
 - `backend/app/services/pdf_generator.py`
-  - Builds PDF via ReportLab
-  - Generates charts via Matplotlib (non-interactive backend)
-  - Embeds metrics and explanation in report
+  - Builds PDF via ReportLab with dark-themed styling
+  - Generates bar charts and donut charts via Matplotlib (`Agg` backend)
+  - All temporary chart images written to a `tempfile.mkdtemp()` dir
+  - Cleanup via `shutil.rmtree()` in `finally` block
+  - Registers DejaVuSans font for Unicode support when available
 
-### 3.4 Domain Configuration
+### 4.4 Domain Configuration
 
 - `backend/app/domain_config.py`
-  - Single source of truth for domains
-  - Defines for each domain:
+  - Single source of truth for supported domains
+  - Current domains: `hiring`, `loan`, `healthcare`, `education`
+  - Each domain defines:
     - `description`
-    - `protected_attributes`
+    - `protected_attributes` (list)
     - `outcome_column`
     - `positive_outcome`
 
 ---
 
-## 4) Frontend Architecture
+## 5) Frontend Architecture
 
-### 4.1 Root and Screen Orchestration
+### 5.1 Routing
 
-- `frontend/src/App.jsx`
+- `frontend/src/App.jsx` — top-level component
 
-Main responsibilities:
+```text
+BrowserRouter
+  ├── /login     → Login page (public)
+  └── /          → ProtectedRoute → DashboardPage
+```
 
-- Fetches domains from backend
-- Manages top-level state:
-  - selected domain, uploaded file, preview rows
-  - analysis response, screen mode, errors, busy flag
-- Routes between screen views:
-  - `workspace`
-  - `loading`
-  - `results`
-  - `history`
-- Handles CSV analyze and sample analyze actions
-- Handles PDF export request
+### 5.2 DashboardPage (Screen Orchestration)
 
-### 4.2 Dashboard Views
+Lives inside `App.jsx`. Manages top-level state:
 
-- `frontend/src/components/dashboard/WorkspaceView.jsx`
-  - Domain selection cards
-  - CSV upload and preview
-  - Run analysis actions
+- Selected domain, uploaded file, CSV preview rows
+- Analysis response, screen mode, errors, busy flag
+- Results transition animation timer
 
-- `frontend/src/components/dashboard/LoadingView.jsx`
-  - Analysis progress UI and staged loading indicators
+Screen modes: `workspace` | `loading` | `results`
 
-- `frontend/src/components/dashboard/ResultsView.jsx`
-  - Per-attribute metric cards
-  - Group-rate chart blocks via `MetricsChart`
-  - Shared DIR label/status rendering
-  - Collapsible AI sidebar (`aiSidebarOpen`)
-  - Responsive grid (`md:grid-cols-12`), stacked on small screens
+Key actions:
+- `refreshDomains()` — fetches domain list from backend
+- `runAnalysis()` — sends CSV + domain to `/api/analyze`
+- `exportReport()` — sends results to `/api/export`, triggers PDF download
+- `resetAudit()` — returns to workspace, clears analysis state
 
-- `frontend/src/components/dashboard/HistoryView.jsx`
-  - Report-style printable view
-  - PDF download trigger
-  - Recent audit cards
+### 5.3 Dashboard Views
 
-- `frontend/src/components/dashboard/TopNav.jsx`
-  - Workspace/results/history navigation
-  - Results/history disabled until analysis exists
+- `WorkspaceView.jsx`
+  - Domain selection cards with icons (Briefcase, DollarSign, Heart, BookOpen)
+  - CSV upload zone with drag/drop hint and file preview table
+  - Run analysis button panel with validation hints
+  - Domain card skeletons during loading
 
-### 4.3 Shared Frontend Components
+- `LoadingView.jsx` + `LoadingStep.jsx`
+  - Staged analysis progress UI with animated step indicators
 
-- `frontend/src/components/MetricsChart.jsx`
-  - Renders group outcome rate comparison bars
-  - Shows DIR value + shared status chip
+- `ResultsView.jsx`
+  - Per-attribute metric cards with severity badges
+  - Group-rate bar charts via `MetricsChart`
+  - DIR status chips via `DisparateImpactStatus`
+  - Collapsible AI explanation sidebar (`aiSidebarOpen` toggle)
+  - PDF export and "New Audit" actions
 
-- `frontend/src/components/GeminiExplanation.jsx`
-  - Splits explanation into sections when headings are present
-  - Renders markdown content via `react-markdown`
+- `TopNav.jsx`
+  - Sticky header with brand logo, nav tabs (Workspace / Results)
+  - Results tab disabled until analysis exists
+  - User avatar + name display, sign-out button
+  - Uses `useAuth()` for user info and logout
 
-- `frontend/src/components/DisparateImpactStatus.jsx`
-  - Displays standardized status chip (`Biased`/`Fair`/`Perfect`/`N/A`)
+### 5.4 Shared UI Components
 
-- `frontend/src/components/disparateImpact.js`
-  - Shared DIR thresholds and helpers:
-    - `disparateImpactTargetLabel`
-    - `getDisparateImpactLabel`
-    - `isDisparateImpactPassing`
+- `MetricsChart.jsx` — group outcome rate comparison bar chart (Recharts)
+- `GeminiExplanation.jsx` — parses and renders AI explanation with section splitting and `react-markdown`
+- `DisparateImpactStatus.jsx` — standardized status chip (`Biased`/`Fair`/`Perfect`/`N/A`)
+- `disparateImpact.js` — shared DIR thresholds and helpers
+- `MetricCard.jsx` — reusable label + large-value display card
+- `SkeletonBlock.jsx` — animated pulse placeholder for loading states
+- `config.js` — severity style map (`High`/`Medium`/`Low` → colors, glows)
 
 ---
 
-## 5) Data Contracts
+## 6) Data Contracts
 
-### 5.1 `/api/analyze` and `/api/sample/{domain}` response shape
+### 6.1 `/api/analyze` response shape
 
 ```json
 {
@@ -185,6 +226,10 @@ Main responsibilities:
         "groups": ["Male", "Female"],
         "demographic_parity_difference": 0.1234,
         "equalized_odds_difference": 0.1022,
+        "equalized_odds_tpr_by_group": {
+          "Male": 0.7654,
+          "Female": 0.6632
+        },
         "disparate_impact_ratio": 0.78,
         "group_selection_rates": {
           "Male": 63.5,
@@ -198,7 +243,7 @@ Main responsibilities:
 }
 ```
 
-### 5.2 `/api/export` request shape
+### 6.2 `/api/export` request shape
 
 ```json
 {
@@ -211,26 +256,33 @@ Response: `application/pdf` stream.
 
 ---
 
-## 6) Bias Logic
+## 7) Bias Logic
 
-### 6.1 Metric Computation (backend)
+### 7.1 Metric Computation (backend)
 
 Within each protected attribute:
 
-- `dpd = demographic_parity_difference(...)`
-- `eod = equalized_odds_difference(...)`
+- `dpd = demographic_parity_difference(y_true, y_pred, sensitive_features)`
+  - Uses Fairlearn library
+  - `y_pred` falls back to `y_true` when no `prediction` column exists
+- `eod = max(TPR per group) - min(TPR per group)`
+  - Custom implementation in `_compute_equalized_odds_difference()`
+  - "Qualified" mask determined by `_select_qualified_mask()`:
+    1. `credit_score >= 650` when that column exists
+    2. Otherwise top 40% by first available numeric feature
+    3. Fallback: all rows treated as qualified
 - `group_selection_rates` computed as percent values
 - `dir_value = min_rate / max_rate` when valid
 
 DIR is set to `null` when rates do not allow safe ratio computation.
 
-### 6.2 Severity Classification (backend)
+### 7.2 Severity Classification (backend)
 
 - `High` if `dir_value < 0.8`
 - else `Medium` if `abs(dpd) > 0.1`
 - else `Low`
 
-### 6.3 DIR Status Classification (frontend)
+### 7.3 DIR Status Classification (frontend)
 
 Shared in `frontend/src/components/disparateImpact.js`:
 
@@ -239,18 +291,16 @@ Shared in `frontend/src/components/disparateImpact.js`:
 - `>= 1.00` => `Perfect`
 - invalid/missing => `N/A`
 
-Target label displayed in UI:
-
-- `Target: at least 0.80`
+Target label displayed in UI: `Target: at least 0.80`
 
 ---
 
-## 7) Validation and Error Handling
+## 8) Validation and Error Handling
 
 ### Backend validations
 
 - Reject non-CSV uploads (`.csv` extension required)
-- Enforce max upload size (10MB)
+- Enforce max upload size (10MB, double-checked after read)
 - Validate domain key exists in `DOMAIN_CONFIG`
 - Validate outcome column exists in CSV
 - Validate at least one configured protected attribute exists
@@ -262,43 +312,57 @@ Target label displayed in UI:
 
 ### Frontend behavior
 
-- Guards against analyze without domain/file
+- Protected routes require user login (redirect to `/login`)
+- Guards against analyze without domain/file selected
 - Displays backend `detail` when available
 - Resets busy/error state per action cycle
 
 ---
 
-## 8) Deployment Topology
+## 9) Deployment Topology
 
-- Frontend static assets: Firebase Hosting
+- **Frontend**: Firebase Hosting
   - Config in `firebase.json`
   - Public dir: `frontend/dist`
-- Backend API: Cloud Run (or local Uvicorn)
-- Production frontend URL currently allowed in backend CORS:
+  - SPA rewrite: `** → /index.html`
+  - Cache headers: `no-cache` for `index.html`, immutable for `/assets/**`
+- **Backend**: Cloud Run (Dockerfile: `python:3.11-slim` + Uvicorn on port 8080)
+- **Production CORS origins**:
   - `https://veritas-ai-01.web.app`
   - `https://veritas-ai-01.firebaseapp.com`
 
 ---
 
-## 9) Key Files
+## 10) Key Files
 
 ### Backend
 
-- `backend/main.py`
-- `backend/app/routes/analyze.py`
-- `backend/app/domain_config.py`
-- `backend/app/services/bias_service.py`
-- `backend/app/services/bias_engine.py`
-- `backend/app/services/gemini_service.py`
-- `backend/app/services/pdf_generator.py`
+- `backend/main.py` — FastAPI app init + CORS + router
+- `backend/auth_middleware.py` — Bearer token verification
+- `backend/firebase_admin_init.py` — Firebase Admin SDK bootstrap
+- `backend/app/routes/analyze.py` — API endpoints
+- `backend/app/domain_config.py` — domain definitions
+- `backend/app/services/bias_service.py` — Fairlearn metric computation
+- `backend/app/services/gemini_service.py` — AI explanation generation
+- `backend/app/services/pdf_generator.py` — PDF report builder
 
 ### Frontend
 
-- `frontend/src/App.jsx`
+- `frontend/src/main.jsx` — React entry point
+- `frontend/src/App.jsx` — routing + dashboard orchestration
+- `frontend/src/firebase.js` — Firebase client init
+- `frontend/src/AuthContext.jsx` — auth context provider
+- `frontend/src/ProtectedRoute.jsx` — auth route guard
+- `frontend/src/api.js` — authenticated HTTP wrapper
+- `frontend/src/pages/Login.jsx` — Google sign-in page
 - `frontend/src/components/dashboard/WorkspaceView.jsx`
 - `frontend/src/components/dashboard/LoadingView.jsx`
+- `frontend/src/components/dashboard/LoadingStep.jsx`
 - `frontend/src/components/dashboard/ResultsView.jsx`
-- `frontend/src/components/dashboard/HistoryView.jsx`
+- `frontend/src/components/dashboard/TopNav.jsx`
+- `frontend/src/components/dashboard/MetricCard.jsx`
+- `frontend/src/components/dashboard/SkeletonBlock.jsx`
+- `frontend/src/components/dashboard/config.js`
 - `frontend/src/components/GeminiExplanation.jsx`
 - `frontend/src/components/MetricsChart.jsx`
 - `frontend/src/components/DisparateImpactStatus.jsx`
@@ -306,9 +370,10 @@ Target label displayed in UI:
 
 ---
 
-## 10) Known Constraints
+## 11) Known Constraints
 
-- Backend is stateless and in-memory; no persistent audit history
-- Sample result cache is process-local (not shared across instances)
-- Frontend report history is session-derived from current analysis
-- PDF chart generation writes temporary image files by name during build
+- Backend bias analysis is stateless; uploaded CSVs are not persisted
+- Domain config is static and defined in code
+- `equalized_odds_difference` uses a custom TPR-based implementation, not Fairlearn's built-in
+- Qualified mask heuristic may not suit all domains (relies on `credit_score` or first numeric column)
+- Frontend still displays "Veritas" branding in Login and TopNav
