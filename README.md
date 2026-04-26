@@ -1,8 +1,8 @@
-# FairScan (formerly Veritas)
+# Veritas
 
 Upload a dataset, detect fairness risks, and generate plain-language audit guidance.
 
-FairScan is a full-stack fairness auditing web app with a FastAPI backend and a React + Vite frontend. It computes Fairlearn metrics (Demographic Parity Difference, Equalized Odds Difference, Disparate Impact Ratio), classifies severity, generates Gemini-based explanations, and exports PDF reports. The app features Firebase Authentication to secure access to the dashboard.
+Veritas is a full-stack fairness auditing web app with a FastAPI backend and a React + Vite frontend. It computes Fairlearn metrics (Demographic Parity Difference, Equalized Odds Difference, Disparate Impact Ratio), classifies severity, generates Gemini-based explanations, and exports PDF reports. The app features Firebase Authentication to secure access to the dashboard.
 
 Live app: `https://veritas-ai-01.web.app`
 
@@ -140,7 +140,7 @@ Returns a PDF stream as a downloadable file.
 ## Project Structure
 
 ```text
-fairscan/
+veritas/
 ├─ backend/
 │  ├─ main.py
 │  ├─ requirements.txt
