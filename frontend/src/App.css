@@ -1,0 +1,77 @@
+/* Veritas custom styles */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #eef2f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c7cedc;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #aeb7ca;
+}
+
+/* Tremor component theming */
+.tremor-Card {
+  @apply bg-surface border-outline-variant shadow-subtle;
+}
+
+.tremor-content {
+  @apply text-on-surface;
+}
+
+.tremor-text {
+  @apply text-on-surface;
+}
+
+.tremor-metric {
+  @apply text-on-surface;
+}
+
+/* Accordion styling */
+[data-state="open"] > button {
+  @apply bg-surface-container-high;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: #ffffff !important;
+  }
+
+  .print-container {
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+}
+
+/* Modal animation */
+@keyframes animateIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-in {
+  animation: animateIn 0.2s ease-out;
+}
+
