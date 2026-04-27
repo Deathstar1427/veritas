@@ -6,6 +6,7 @@ import {
   Loader,
   Play,
   Upload,
+  Database,
 } from 'lucide-react'
 import SkeletonBlock from './SkeletonBlock'
 
@@ -15,6 +16,12 @@ const domainIcons = {
   healthcare: Heart,
   education: BookOpen,
 }
+
+const sampleDomains = [
+  { key: 'hiring', label: 'Hiring', icon: Briefcase },
+  { key: 'loan', label: 'Loan', icon: DollarSign },
+  { key: 'healthcare', label: 'Healthcare', icon: Heart },
+]
 
 export default function WorkspaceView({
   domains,
@@ -29,9 +36,10 @@ export default function WorkspaceView({
   runAnalysis,
   busy,
   analysisError,
+  onSampleAnalyze,
 }) {
   return (
-    <section className="space-y-8">
+    <section className="space-y-8" aria-label="Bias audit workspace">
       <div className="space-y-2">
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">
           Bias Audit Workspace
@@ -47,7 +55,7 @@ export default function WorkspaceView({
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
         <div className="space-y-6 lg:col-span-8">
-          <section className="rounded-lg border border-outline-variant bg-surface p-6 shadow-subtle">
+          <section className="rounded-lg border border-outline-variant bg-surface p-6 shadow-subtle" aria-label="Domain selection">
             <div className="mb-4 flex items-center justify-between gap-3">
               <h2 className="font-headline text-xl font-bold text-on-surface">
                 1) Select Domain
@@ -56,6 +64,7 @@ export default function WorkspaceView({
                 type="button"
                 onClick={refreshDomains}
                 disabled={domainsLoading}
+                aria-label="Refresh available domains"
                 className="rounded-md border border-outline-variant bg-surface-container-high px-3 py-1.5 text-xs font-semibold text-on-surface transition hover:bg-surface-container-highest disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {domainsLoading ? 'Refreshing...' : 'Refresh'}
@@ -63,7 +72,7 @@ export default function WorkspaceView({
             </div>
 
             {domainsError ? (
-              <div className="mb-4 rounded-md border border-error/30 bg-error-container p-3 text-sm text-error">
+              <div className="mb-4 rounded-md border border-error/30 bg-error-container p-3 text-sm text-error" role="alert">
                 {domainsError}
               </div>
             ) : null}
@@ -83,7 +92,7 @@ export default function WorkspaceView({
                 Load available domains
               </button>
             ) : (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" role="radiogroup" aria-label="Available audit domains">
                 {Object.entries(domains).map(([key, config]) => {
                   const Icon = domainIcons[key] || Briefcase
                   const active = selectedDomain === key
@@ -91,6 +100,8 @@ export default function WorkspaceView({
                     <button
                       key={key}
                       type="button"
+                      role="radio"
+                      aria-checked={active}
                       onClick={() => setSelectedDomain(key)}
                       className={`rounded-lg border p-4 text-left transition ${
                         active
@@ -124,7 +135,7 @@ export default function WorkspaceView({
             )}
           </section>
 
-          <section className="rounded-lg border border-outline-variant bg-surface p-6 shadow-subtle">
+          <section className="rounded-lg border border-outline-variant bg-surface p-6 shadow-subtle" aria-label="CSV upload">
             <h2 className="font-headline text-xl font-bold text-on-surface">
               2) Upload CSV
             </h2>
@@ -146,6 +157,7 @@ export default function WorkspaceView({
                 type="file"
                 accept=".csv"
                 className="hidden"
+                aria-label="Upload CSV file"
                 onChange={(event) => handleFile(event.target.files?.[0])}
               />
             </label>
@@ -161,7 +173,7 @@ export default function WorkspaceView({
 
                 {previewRows.length > 0 ? (
                   <div className="mt-4 overflow-x-auto rounded-md border border-outline-variant">
-                    <table className="min-w-full text-left text-xs">
+                    <table className="min-w-full text-left text-xs" aria-label="CSV preview">
                       <thead className="bg-surface-container-high">
                         <tr>
                           {previewRows[0].split(',').map((col) => (
@@ -196,6 +208,36 @@ export default function WorkspaceView({
                 ) : null}
               </div>
             ) : null}
+
+            {/* Sample dataset buttons */}
+            {onSampleAnalyze && (
+              <div className="mt-6 rounded-lg border border-dashed border-primary/30 bg-primary/[0.03] p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <Database size={16} className="text-primary" />
+                  <p className="text-sm font-semibold text-on-surface">
+                    No CSV? Try a sample dataset
+                  </p>
+                </div>
+                <p className="text-xs text-on-surface-variant mb-4">
+                  Instantly run an audit on a pre-built sample to see Veritas in action.
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  {sampleDomains.map(({ key, label, icon: SIcon }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onSampleAnalyze(key)}
+                      aria-label={`Try sample ${label} dataset`}
+                      className="inline-flex items-center gap-2 rounded-md border border-primary/30 bg-surface px-4 py-2.5 text-sm font-semibold text-primary transition hover:bg-primary/5 hover:border-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <SIcon size={15} />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
         </div>
 
@@ -213,6 +255,7 @@ export default function WorkspaceView({
                 type="button"
                 onClick={() => runAnalysis()}
                 disabled={busy || !selectedDomain || !file}
+                aria-label="Run bias analysis on uploaded dataset"
                 className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-3 text-sm font-bold text-on-primary transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy ? (
@@ -237,7 +280,7 @@ export default function WorkspaceView({
           </div>
 
           {analysisError ? (
-            <div className="rounded-md border border-error/30 bg-error-container p-4 text-sm text-error">
+            <div className="rounded-md border border-error/30 bg-error-container p-4 text-sm text-error" role="alert">
               {analysisError}
             </div>
           ) : null}

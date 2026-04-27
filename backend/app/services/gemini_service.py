@@ -67,16 +67,23 @@ else:
         model = None
 
 
-def explain_bias(bias_results: dict) -> str:
+def explain_bias(bias_results: dict) -> dict:
     """
     Takes raw Fairlearn numbers and asks Gemini to explain
     them in plain language a non-technical person can act on.
 
+    Returns a dict with 'explanation' and 'remediation' keys.
+
     Think of Gemini as the translator —
     turns confusing numbers into a clear story.
     """
+    fallback = {
+        "explanation": "Bias explanation unavailable — GEMINI_API_KEY not set or model failed to initialize.",
+        "remediation": [],
+    }
+
     if model is None:
-        return "Bias explanation unavailable — GEMINI_API_KEY not set or model failed to initialize."
+        return fallback
 
     domain = bias_results["domain"]
     total = bias_results["total_records"]
@@ -108,34 +115,94 @@ Bias findings:
 Write a clear, plain-language report that:
 1. Summarizes what bias was found (or not found)
 2. Explains what each finding means in real-world terms
-3. Gives 2-3 specific, actionable recommendations to fix the bias
-4. Uses simple language — no jargon, no ML terms
+3. Uses simple language — no jargon, no ML terms
 
-Keep it under 250 words. Be direct and honest.
+Keep it under 200 words. Be direct and honest.
+
+Also suggest 3 concrete remediation steps to reduce the detected bias.
+Format as:
+REMEDIATION:
+1. [step one]
+2. [step two]
+3. [step three]
 """
 
     try:
         response = model.generate_content(prompt)
-        return response.text
+        raw = response.text or ""
+
+        explanation = raw
+        remediation = []
+
+        if "REMEDIATION:" in raw:
+            parts = raw.split("REMEDIATION:", 1)
+            explanation = parts[0].strip()
+            rem_text = parts[1].strip()
+            import re
+            steps = re.findall(r"\d+\.\s*(.+)", rem_text)
+            remediation = [s.strip() for s in steps if s.strip()]
+
+        return {"explanation": explanation, "remediation": remediation}
     except Exception as e:
         error_text = str(e)
         logger.error(f"Gemini API call failed: {error_text}")
 
         lowered = error_text.lower()
         if "429" in lowered or "quota" in lowered or "rate" in lowered:
-            return (
-                "AI explanation is temporarily unavailable because the Gemini API "
-                "quota or rate limit was reached. Bias metrics are still valid. "
-                "Please try again later or use a key with available quota."
-            )
+            return {
+                "explanation": (
+                    "AI explanation is temporarily unavailable because the Gemini API "
+                    "quota or rate limit was reached. Bias metrics are still valid. "
+                    "Please try again later or use a key with available quota."
+                ),
+                "remediation": [],
+            }
 
         if "404" in lowered or "not found" in lowered or "model" in lowered:
-            return (
-                "AI explanation is temporarily unavailable due to a Gemini model "
-                "compatibility issue. Bias metrics are still valid."
-            )
+            return {
+                "explanation": (
+                    "AI explanation is temporarily unavailable due to a Gemini model "
+                    "compatibility issue. Bias metrics are still valid."
+                ),
+                "remediation": [],
+            }
 
-        return (
-            "AI explanation is temporarily unavailable right now. Bias metrics "
-            "are still valid and can be used for the audit."
-        )
+        return {
+            "explanation": (
+                "AI explanation is temporarily unavailable right now. Bias metrics "
+                "are still valid and can be used for the audit."
+            ),
+            "remediation": [],
+        }
+
+
+def generate_model_card(bias_results: dict, domain: str) -> str:
+    """
+    Generate a Hugging Face-format model card from audit results.
+    """
+    import json
+
+    if model is None:
+        return "# Model Card\n\nModel card generation unavailable — GEMINI_API_KEY not set."
+
+    prompt = f"""
+Generate a Hugging Face model card in markdown format based on these fairness audit results
+for a {domain} prediction model.
+
+Audit results: {json.dumps(bias_results, indent=2)}
+
+Include these sections:
+- Model description
+- Intended use and out-of-scope uses
+- Bias and fairness evaluation (with a markdown table of metrics)
+- Recommendations
+- Ethical considerations
+
+Use proper markdown headings. Be specific and cite the actual metric values.
+"""
+    try:
+        response = model.generate_content(prompt)
+        return response.text or "# Model Card\n\nGeneration returned empty content."
+    except Exception as e:
+        logger.error(f"Model card generation failed: {str(e)}")
+        return f"# Model Card\n\nGeneration failed: {str(e)}"

@@ -147,6 +147,45 @@ function DashboardPage() {
     }
   }
 
+  const onSampleAnalyze = async (domain) => {
+    setSelectedDomain(domain)
+    setBusy(true)
+    setAnalysisError('')
+    setScreen('loading')
+
+    try {
+      const sampleResp = await authenticatedFetch(`${baseUrl}/api/sample/${domain}`)
+      if (!sampleResp.ok) throw new Error('Failed to fetch sample dataset')
+      const sampleBlob = await sampleResp.blob()
+      const sampleFile = new File([sampleBlob], `${domain}_sample.csv`, { type: 'text/csv' })
+
+      const formData = new FormData()
+      formData.append('file', sampleFile)
+      formData.append('domain', domain)
+
+      const response = await authenticatedFetch(`${baseUrl}/api/analyze`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      const responseData = await response.json()
+      if (!response.ok) {
+        throw new Error(responseData?.detail || 'Analysis failed.')
+      }
+
+      setAnalysisData(responseData)
+      setResultsTransitioning(true)
+      if (resultsTransitionTimerRef.current) clearTimeout(resultsTransitionTimerRef.current)
+      resultsTransitionTimerRef.current = setTimeout(() => setResultsTransitioning(false), 700)
+      setScreen('results')
+    } catch (error) {
+      setAnalysisError(error?.message || 'Sample analysis failed.')
+      setScreen('workspace')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const exportReport = async () => {
     if (!analysisData) return
     setBusy(true)
@@ -185,6 +224,48 @@ function DashboardPage() {
       window.URL.revokeObjectURL(url)
     } catch (error) {
       setAnalysisError(error?.message || 'Failed to export PDF report.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const exportModelCard = async () => {
+    if (!analysisData) return
+    setBusy(true)
+    setAnalysisError('')
+    try {
+      const payload = {
+        bias_results: analysisData.results,
+        domain: analysisData.results?.domain || 'unknown',
+      }
+
+      const response = await authenticatedFetch(`${baseUrl}/api/model-card`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        let detail = 'Failed to generate model card.'
+        try {
+          const err = await response.json()
+          detail = err?.detail || detail
+        } catch {
+          // no-op
+        }
+        throw new Error(detail)
+      }
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `model_card_${analysisData.results?.domain || 'audit'}.md`)
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode?.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      setAnalysisError(error?.message || 'Failed to generate model card.')
     } finally {
       setBusy(false)
     }
@@ -237,6 +318,7 @@ function DashboardPage() {
             runAnalysis={runAnalysis}
             busy={busy}
             analysisError={analysisError}
+            onSampleAnalyze={onSampleAnalyze}
           />
         )}
 
@@ -250,6 +332,7 @@ function DashboardPage() {
             setScreen={setScreen}
             resetAudit={resetAudit}
             exportReport={exportReport}
+            exportModelCard={exportModelCard}
             busy={busy}
             loadingSkeleton={resultsTransitioning}
           />

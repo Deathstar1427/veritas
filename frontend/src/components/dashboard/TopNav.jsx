@@ -57,6 +57,8 @@ export default function TopNav({ screen, setScreen, hasResults }) {
                   key={item.id}
                   type="button"
                   onClick={() => canOpenScreen(item.id) && setScreen(item.id)}
+                  aria-current={active ? 'page' : undefined}
+                  aria-disabled={disabled}
                   className={`border-b-2 pb-1 text-sm font-semibold transition ${
                     active
                       ? 'border-primary text-primary'
@@ -79,7 +81,7 @@ export default function TopNav({ screen, setScreen, hasResults }) {
                 {avatarUrl ? (
                   <img
                     src={avatarUrl}
-                    alt={displayName}
+                    alt={`${displayName}'s avatar`}
                     className="h-8 w-8 rounded-full border border-outline-variant object-cover"
                     referrerPolicy="no-referrer"
                   />
@@ -96,6 +98,7 @@ export default function TopNav({ screen, setScreen, hasResults }) {
                 type="button"
                 onClick={handleLogout}
                 title="Sign out"
+                aria-label="Sign out of your account"
                 className="inline-flex items-center gap-1.5 rounded-md border border-outline-variant px-3 py-1.5 text-xs font-semibold text-on-surface-variant transition hover:border-error/40 hover:bg-error-container hover:text-error"
               >
                 <LogOut size={13} />

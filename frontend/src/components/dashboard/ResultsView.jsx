@@ -1,11 +1,15 @@
 import { useState } from 'react'
+import ReactMarkdown from 'react-markdown'
 import {
   AlertTriangle,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Download,
+  FileText,
   Sparkles,
+  Search,
+  SlidersHorizontal,
 } from 'lucide-react'
 import DisparateImpactStatus from '../DisparateImpactStatus'
 import {
@@ -60,12 +64,120 @@ function metricCardData(metric) {
   ]
 }
 
+function WhatIfSimulator({ groupRates, attrName }) {
+  const [threshold, setThreshold] = useState(0.5)
+
+  const entries = Object.entries(groupRates || {})
+  if (entries.length < 2) return null
+
+  const adjustedRates = Object.fromEntries(
+    entries.map(([group, rate]) => [
+      group,
+      Math.min(100, rate * (threshold / 0.5)),
+    ]),
+  )
+
+  const rateValues = Object.values(adjustedRates)
+  const minRate = Math.min(...rateValues)
+  const maxRate = Math.max(...rateValues)
+  const adjustedDIR = maxRate > 0 && minRate > 0 ? minRate / maxRate : null
+
+  return (
+    <div className="mt-4 rounded-lg border border-primary/20 bg-primary/[0.03] p-5">
+      <div className="flex items-center gap-2 mb-3">
+        <SlidersHorizontal size={16} className="text-primary" />
+        <h4 className="text-sm font-bold text-on-surface">What-If Threshold Simulator</h4>
+      </div>
+      <p className="text-xs text-on-surface-variant mb-4">
+        Adjust the decision threshold and see how the Disparate Impact Ratio changes in real time.
+      </p>
+      <div className="flex items-center gap-4 mb-4">
+        <label htmlFor={`threshold-${attrName}`} className="text-xs font-semibold text-on-surface-variant whitespace-nowrap">
+          Threshold: {threshold.toFixed(2)}
+        </label>
+        <input
+          id={`threshold-${attrName}`}
+          type="range"
+          min={0.1}
+          max={0.9}
+          step={0.01}
+          value={threshold}
+          onChange={(e) => setThreshold(+e.target.value)}
+          className="flex-1 h-2 rounded-full accent-primary cursor-pointer"
+          aria-label={`Decision threshold for ${attrName}`}
+        />
+      </div>
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-on-surface-variant">Adjusted DIR:</span>
+          <span className={`font-headline text-2xl font-bold ${
+            adjustedDIR !== null && adjustedDIR < 0.8 ? 'text-error' : 'text-on-surface'
+          }`}>
+            {adjustedDIR !== null ? adjustedDIR.toFixed(3) : 'N/A'}
+          </span>
+        </div>
+        {adjustedDIR !== null && <DisparateImpactStatus score={adjustedDIR} />}
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+        {Object.entries(adjustedRates).map(([group, rate]) => (
+          <div key={group} className="rounded-md bg-surface-container-low border border-outline-variant px-3 py-2">
+            <p className="text-[11px] font-semibold text-on-surface-variant truncate">{group}</p>
+            <p className="text-sm font-bold text-on-surface">{rate.toFixed(1)}%</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ProxyColumnsCard({ proxyColumns }) {
+  if (!proxyColumns || Object.keys(proxyColumns).length === 0) return null
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-5 shadow-subtle">
+      <div className="flex items-center gap-2 mb-3">
+        <Search size={16} className="text-amber-600" />
+        <h3 className="font-headline text-lg font-bold text-on-surface">
+          Likely Proxy Columns Detected
+        </h3>
+      </div>
+      <p className="text-xs text-on-surface-variant mb-4">
+        These columns correlate strongly with protected attributes and may act as hidden proxies for bias.
+      </p>
+      {Object.entries(proxyColumns).map(([attr, proxies]) => (
+        <div key={attr} className="mb-3 last:mb-0">
+          <p className="text-xs font-bold uppercase tracking-wider text-amber-700 mb-2">
+            Proxies for: {attr.replaceAll('_', ' ')}
+          </p>
+          <div className="space-y-1.5">
+            {proxies.map(({ column, correlation }) => (
+              <div key={column} className="flex items-center justify-between rounded-md bg-white border border-amber-100 px-3 py-2">
+                <span className="text-sm font-medium text-on-surface">{column}</span>
+                <span className={`text-xs font-bold rounded-full px-2 py-0.5 ${
+                  correlation > 0.5
+                    ? 'bg-error-container text-error border border-error/30'
+                    : correlation > 0.3
+                      ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                      : 'bg-surface-container-high text-on-surface-variant border border-outline-variant'
+                }`}>
+                  {correlation.toFixed(3)} correlation
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function ResultsView({
   analysisData,
   overallSeverity,
   metricsList,
   resetAudit,
   exportReport,
+  exportModelCard,
   busy,
   loadingSkeleton,
 }) {
@@ -75,8 +187,11 @@ export default function ResultsView({
     return <ResultsSkeleton />
   }
 
+  const proxyColumns = analysisData?.results?.proxy_columns || {}
+  const remediation = analysisData?.remediation || []
+
   return (
-    <section className="space-y-8">
+    <section className="space-y-8" aria-label="Audit results">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="font-headline text-4xl font-bold tracking-tight text-on-surface md:text-[42px]">
@@ -92,6 +207,7 @@ export default function ResultsView({
             type="button"
             onClick={() => setAiSidebarOpen((open) => !open)}
             aria-expanded={aiSidebarOpen}
+            aria-label={aiSidebarOpen ? 'Collapse AI explanation panel' : 'Expand AI explanation panel'}
             className="inline-flex items-center gap-2 rounded-md border border-outline-variant px-4 py-2 text-sm font-semibold text-on-surface transition hover:bg-surface-container-high"
           >
             {aiSidebarOpen ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
@@ -101,14 +217,28 @@ export default function ResultsView({
             type="button"
             onClick={exportReport}
             disabled={busy}
+            aria-label="Export audit results as PDF report"
             className="inline-flex items-center gap-2 rounded-md border border-primary/40 px-4 py-2 text-sm font-semibold text-primary transition hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Download size={14} />
             Export PDF
           </button>
+          {exportModelCard && (
+            <button
+              type="button"
+              onClick={exportModelCard}
+              disabled={busy}
+              aria-label="Generate and download model card"
+              className="inline-flex items-center gap-2 rounded-md border border-primary/40 px-4 py-2 text-sm font-semibold text-primary transition hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <FileText size={14} />
+              Model Card
+            </button>
+          )}
           <button
             type="button"
             onClick={resetAudit}
+            aria-label="Start a new audit"
             className="rounded-md bg-primary px-4 py-2 text-sm font-bold text-on-primary transition hover:brightness-105"
           >
             New Audit
@@ -145,6 +275,9 @@ export default function ResultsView({
           </span>
         </div>
       </div>
+
+      {/* Proxy columns warning card */}
+      <ProxyColumnsCard proxyColumns={proxyColumns} />
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-12">
         <div className={`space-y-6 ${aiSidebarOpen ? 'md:col-span-8' : 'md:col-span-12'}`}>
@@ -203,14 +336,46 @@ export default function ResultsView({
                   disparateImpactRatio={metric.disparate_impact_ratio}
                   attributeName={attrName}
                 />
+
+                <WhatIfSimulator
+                  groupRates={metric.group_selection_rates}
+                  attrName={attrName}
+                />
               </div>
             )
           })}
         </div>
 
         {aiSidebarOpen ? (
-          <aside className="space-y-6 md:col-span-4">
+          <aside className="space-y-6 md:col-span-4" aria-label="AI explanation and recommendations">
             <GeminiExplanation explanation={analysisData.explanation || ''} />
+
+            {/* Gemini-generated remediation steps */}
+            {remediation.length > 0 && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-6 shadow-subtle">
+                <h3 className="flex items-center gap-2 font-headline text-xl font-bold text-on-surface">
+                  <Sparkles size={18} className="text-emerald-600" />
+                  AI Remediation Steps
+                </h3>
+                <p className="mt-1 text-xs text-on-surface-variant mb-4">
+                  Gemini-generated suggestions to reduce detected bias
+                </p>
+                <div className="grid grid-cols-1 gap-3">
+                  {remediation.map((step, idx) => (
+                    <div key={idx} className="rounded-md border border-emerald-200 bg-white p-4">
+                      <div className="flex items-start gap-3">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700">
+                          {idx + 1}
+                        </span>
+                        <div className="text-sm text-on-surface leading-relaxed prose prose-sm prose-emerald">
+                          <ReactMarkdown>{step}</ReactMarkdown>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="rounded-lg border border-outline-variant bg-surface p-6 shadow-subtle">
               <h3 className="flex items-center gap-2 font-headline text-xl font-bold text-on-surface">

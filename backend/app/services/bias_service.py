@@ -200,3 +200,38 @@ def detect_bias(df: pd.DataFrame, domain: str) -> dict:
         "attributes_analyzed": available_attrs,
         "bias_metrics": results,
     }
+
+
+def detect_proxy_columns(
+    df: pd.DataFrame,
+    protected_attr: str,
+    outcome_col: str,
+    protected_attrs: list[str],
+) -> list[dict]:
+    """
+    Detect columns that may be proxies for a protected attribute.
+    Returns the top 3 columns most correlated with the protected attribute.
+    """
+    proxies = {}
+    for col in df.columns:
+        if col in protected_attrs or col == outcome_col:
+            continue
+        try:
+            # Encode categorical columns as numeric codes
+            a = (
+                pd.Categorical(df[col]).codes
+                if df[col].dtype == object
+                else df[col]
+            )
+            b = (
+                pd.Categorical(df[protected_attr]).codes
+                if df[protected_attr].dtype == object
+                else df[protected_attr]
+            )
+            corr = abs(pd.Series(a).corr(pd.Series(b)))
+            if not pd.isna(corr):
+                proxies[col] = round(float(corr), 3)
+        except Exception:
+            continue
+    top = sorted(proxies.items(), key=lambda x: x[1], reverse=True)[:3]
+    return [{"column": col, "correlation": corr} for col, corr in top]

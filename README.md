@@ -116,6 +116,18 @@ Returns:
 Generates a PDF report from a JSON payload containing the bias results and Gemini explanation.
 Returns a PDF stream as a downloadable file.
 
+### `GET /api/sample/{domain}`
+Returns a pre-built sample CSV for the given domain (`hiring`, `loan`, `healthcare`).
+Useful for one-click demo functionality. Rate limited to 30 requests per minute.
+
+### `POST /api/model-card`
+Generates a Hugging Face-format model card in markdown from the bias audit results.
+Requires authentication. Expects:
+- `bias_results`: the full results object from `/api/analyze`
+- `domain`: the domain name
+
+Returns a downloadable markdown file.
+
 ---
 
 ## Bias Metrics and Severity
@@ -193,3 +205,23 @@ firebase deploy --only hosting --project veritas-ai-01
 - **Stateless Backend:** The backend is completely stateless and processes data in-memory. Uploaded CSVs are not persisted to any database.
 - **No Database Needed:** While Firebase Auth is used for user authentication, there is no database (like Firestore or PostgreSQL) needed or used to store past audit results.
 - **Graceful Degradation:** Gemini failures (e.g., rate limits or invalid keys) are handled gracefully with a fallback explanation text. Bias metrics will still be computed and displayed.
+
+---
+
+## Roadmap
+
+The following features are planned for future iterations:
+
+- [ ] **What-If threshold simulator** — adjust decision thresholds live and see how DPD/EOD/DIR change in real time *(implemented in v1.1)*
+- [ ] **Proxy column detector** — automatically identify non-protected columns that correlate strongly with protected attributes *(implemented in v1.1)*
+- [ ] **AI remediation suggestions** — Gemini-generated concrete steps to reduce detected bias *(implemented in v1.1)*
+- [ ] **Auto-generated model cards** — produce Hugging Face-format model cards directly from audit results *(implemented in v1.1)*
+- [ ] **Custom column mapping** — support any CSV schema, not just the 4 pre-defined domains
+- [ ] **Real-time model monitoring** — REST endpoint for CI/CD pipelines to audit models on every training run
+- [ ] **Regulatory compliance mapping** — map results to EU AI Act, EEOC, and ECOA standards
+- [ ] **Audit history persistence** — store and compare audits over time via Firestore
+- [ ] **NLP and image bias detection** — extend beyond tabular data to text classifiers and vision models
+- [ ] **Team collaboration** — share audits, add comments, assign remediation owners
+- [ ] **Public audit API** — expose fairness checks as a developer API with key-based auth
+- [ ] **Configurable severity thresholds** — EU cutoffs differ from US 0.80 standard
+

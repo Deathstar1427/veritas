@@ -93,6 +93,8 @@ FastAPI backend (/api/*)
   - CORS middleware for local dev + production origins
   - Registers router under `/api`
   - Exposes `GET /` and `GET /health`
+  - Rate limiting via `slowapi` (global limiter)
+  - Sample dataset endpoint `GET /api/sample/{domain}`
 
 ### 4.2 Router
 
@@ -103,8 +105,10 @@ Endpoints:
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/api/domains` | No | Returns available domains and config |
-| `POST` | `/api/analyze` | Yes (Bearer) | Accepts CSV + domain, returns bias metrics + explanation |
+| `POST` | `/api/analyze` | Yes (Bearer) | Accepts CSV + domain, returns bias metrics + explanation + remediation + proxy columns |
 | `POST` | `/api/export` | No | Accepts bias results JSON, returns PDF stream |
+| `GET` | `/api/sample/{domain}` | No | Returns pre-built sample CSV for one-click demo |
+| `POST` | `/api/model-card` | Yes (Bearer) | Generates HuggingFace-format model card markdown |
 
 ### 4.3 Services
 
@@ -118,11 +122,13 @@ Endpoints:
     - **Disparate Impact Ratio** (`min_rate / max_rate`)
   - Determines bias severity per attribute (`High`, `Medium`, `Low`)
   - Returns `equalized_odds_tpr_by_group` per attribute for debugging
+  - `detect_proxy_columns(df, protected_attr, outcome_col, protected_attrs)` — detects columns highly correlated with protected attributes (top 3)
 
 - `backend/app/services/gemini_service.py`
   - Initializes Gemini client from `GEMINI_API_KEY`
   - Dynamically selects preferred available model
-  - Produces concise natural-language explanation
+  - `explain_bias()` — returns dict with `explanation` + `remediation` (3 concrete steps)
+  - `generate_model_card()` — produces HuggingFace-format model card from audit results
   - Handles API/model/quota failures with fallback messages
 
 - `backend/app/services/pdf_generator.py`

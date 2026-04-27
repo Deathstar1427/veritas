@@ -19,11 +19,17 @@ export default function MetricsChart({
   const sorted = entries.sort((a, b) => b[1] - a[1])
   const topRate = sorted.length > 0 ? sorted[0][1] : 0
 
+  const ariaDescription = `Bar chart showing ${title} group outcome rates. ${sorted.map(([g, r]) => `${g}: ${r.toFixed(1)}%`).join(', ')}`
+
   return (
-    <Card className="rounded-lg border border-outline-variant bg-surface p-5 shadow-subtle">
+    <Card
+      className="rounded-lg border border-outline-variant bg-surface p-5 shadow-subtle"
+      role="img"
+      aria-label={ariaDescription}
+    >
       <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h4 className="font-headline text-lg font-bold text-on-surface">
-          Outcome Rates Across {title} Groups
+          Outcome Rates by {title}
         </h4>
         <div className="flex items-center gap-4 text-xs text-on-surface-variant">
           <div className="flex items-center gap-2">
